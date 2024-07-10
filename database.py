@@ -40,6 +40,7 @@ def add_faces_to_db(name, encoding):
     cursor.execute(add_faces, data_faces)
 
 '''
+# how to add to face table
 add_faces_to_db('andrew', img_to_encoding("images/andrew.jpg", FRmodel))
 add_faces_to_db('kian', img_to_encoding("images/kian.jpg", FRmodel))
 add_faces_to_db('danielle', img_to_encoding("images/danielle.png", FRmodel))
