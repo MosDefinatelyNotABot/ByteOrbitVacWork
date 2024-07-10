@@ -1,83 +1,123 @@
-import psycopg2 # make sure to pip install psycopg2 for postgreSQL
-import pickle   # install pickle --> to be deleted when vectordb is done
+import psycopg2 # make sure to pip install psycopg2 for postgreSQL & downloaded postgreSQL on your machine
+                    # also make sure your postgreSQL is running if running locally
+from psycopg2 import sql
+import pickle 
+import numpy as np
 
 
 
-conn = psycopg2.connect(user="postgres", password='2518',
-                        host='localhost', database='FaceDetect')
-print("Connection established")
+class vectorDB:
 
-conn.set_session(autocommit=True)
+    # myDB = vectorDB()
+    def __init__(self, user : str, password : str, host = 'localhost'): # if host not given, uses localhost
+        self.user = user
+        self.password = password    # probably not the safest approach to get pw ??
+        self.dbName = "postgres"
+        self.host = host
 
-cursor = conn.cursor()
+        '''
+        conn = psycopg2.connect(user="postgres", password='2518',
+                                host='localhost', database='FaceDetect')
+        '''
 
-cursor.execute(
-    """
-    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+        self.conn = psycopg2.connect(user=self.user, password=self.password,
+                                host=self.host, dbName=self.dbName)
+        
+        print("Connection established")
 
-
-    DROP TABLE IF EXISTS faces;
-
-    CREATE TABLE IF NOT EXISTS faces (
-        id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-        name VARCHAR(255) NOT NULL,
-        encoding BYTEA NOT NULL
-    )
-    """
-)
-print("'faces' table created")
-
-
-def add_faces_to_db(name, encoding):
-    add_faces = ("INSERT INTO FACES "
-                "(name, encoding) "
-                "VALUES (%s, %s)")
+        self.conn.set_session(autocommit=True)
     
-    pickled_encoding = pickle.dumps(encoding) # dumps() serialises an object
-    
-    data_faces = (name, pickled_encoding)
 
-    cursor.execute(add_faces, data_faces)
+    # myDB.createDB("faceDetection")
+    def createDB(self, dbName : str):
+        cursor = self.conn.cursor()
 
-'''
-# how to add to face table
-add_faces_to_db('andrew', img_to_encoding("images/andrew.jpg", FRmodel))
-add_faces_to_db('kian', img_to_encoding("images/kian.jpg", FRmodel))
-add_faces_to_db('danielle', img_to_encoding("images/danielle.png", FRmodel))
-add_faces_to_db('younes', img_to_encoding("images/younes.jpg", FRmodel))
+        cursor.execute(sql.SQL("SELECT 1 FROM pg_catalog.pg_database WHERE datname = %s"), [dbName]) # checks if db with this name exists
 
-print("Added faces to db")
-
-'''
-
-def verify(image_path, identity, model): # erased 'database' from prev version
-
-    conn = psycopg2.connect(user="postgres", password='2518',
-                        host='localhost', database='FaceDetect')
-    
-    conn.set_session(autocommit=True)
-    cursor = conn.cursor()
+        exists = cursor.fetchone()
+        
+        if not exists:
+            cursor.execute(sql.SQL("CREATE DATABASE %s"), [dbName])  # ensures no duplicate DB is created
+        
+        print("Database successfully created!")
 
     
-    encoding = img_to_encoding(image_path, model)
+    # myDB.createTable("Faces")
+    def createTable(self, tableName : str):
 
-    query = ("SELECT encoding FROM faces WHERE name='%s'") % (identity)
-    cursor.execute(query)
+        cursor = self.conn.cursor()
 
-    unpickled_encoding = pickle.loads(cursor.fetchone()[0]) # back to numpy
- 
+        cursor.execute(
+            """
+            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
-    dist = np.linalg.norm(tf.subtract(unpickled_encoding, encoding))
+            DROP TABLE IF EXISTS {%s};
+
+            CREATE TABLE IF NOT EXISTS faces (
+                id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+                name VARCHAR(255) NOT NULL,
+                encoding BYTEA NOT NULL
+            )
+            """
+        )[tableName]
+
+        print("Table successfully created!")
+
+        cursor.close()
+
+
+    # myDB.addFaces('andrew', img_to_encoding("images/andrew.jpg", FRmodel))
+    def addFaces(self, name : str, encoding : np):  # otherwise take image_path : str rather than encoding
     
-    if dist < 0.7:
-        print("It's " + str(identity) + ", welcome in!")
-        door_open = True
-    else:
-        print("It's not " + str(identity) + ", please go away")
-        door_open = False
-    return dist, door_open
+        cursor = self.conn.cursor()
+
+        add_faces = ("INSERT INTO FACES "
+                    "(name, encoding) "
+                    "VALUES (%s, %s)")
+        
+        pickled_encoding = pickle.dumps(encoding) # dumps() serialises an object
+        
+        data_faces = (name, pickled_encoding)
+
+        cursor.execute(add_faces, data_faces)
+
+        print("Added faces to db")
+
+        cursor.close()
+
+
+    # myDB.verify("images/andrew.jpg", "andrew", FRmodel)
+    def verify(self, image_path, identity, model): # erased 'database' from prev version
+        
+        cursor = self.conn.cursor()
+
+        
+        encoding = img_to_encoding(image_path, model)
+
+        query = ("SELECT encoding FROM faces WHERE name='%s'") % (identity)
+        cursor.execute(query)
+    
+
+        unpickled_encoding = pickle.loads(cursor.fetchone()[0]) # back to numpy
+    
+
+        dist = np.linalg.norm(tf.subtract(unpickled_encoding, encoding))
+        
+        if dist < 0.7:
+            print("It's " + str(identity) + ", welcome in!")
+            door_open = True
+        else:
+            print("It's not " + str(identity) + ", please go away")
+            door_open = False
+
+            cursor.close()
+
+        return dist, door_open
+    
+        
+    # myDB.close_conn()
+    def close_conn(self):
+        self.conn.close()
 
 
 
-cursor.close()
-conn.close()
