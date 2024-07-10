@@ -127,12 +127,16 @@ class vectorDB:
 
 
 myDB = vectorDB('postgres', '2518', 'testDB', 'localhost')
-myDB.createTable('faces')
-myDB.addFaces('faces', 'andrew', 'img_to_encoding("images/andrew.jpg", FRmodel')
-myDB.addFaces('faces', 'danielle', 'img_to_encoding("images/danielle.png", FRmodel')
-myDB.addFaces('faces', 'kian', 'img_to_encoding("images/kian.jpg", FRmodel')
-myDB.verify('faces', 'images/andrew.jpg', 'danielle', FRmodel)  
 
+myDB.createFaceTable('faces')
+
+myDB.addFaces('faces', 'andrew', img_to_encoding("images/andrew.jpg", FRmodel))
+myDB.addFaces('faces', 'danielle', img_to_encoding("images/danielle.png", FRmodel))
+myDB.addFaces('faces', 'kian', img_to_encoding("images/kian.jpg", FRmodel))
+myDB.addFaces('faces', 'younes', img_to_encoding("images/andrew.jpg", FRmodel))
+myDB.verify('faces', 'images/andrew.jpg', 'danielle', FRmodel)
+
+myDB.close_conn()
 
 
 
