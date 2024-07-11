@@ -323,3 +323,24 @@ myDB.verify('images/min.jpg', 'min kim', FRmodel)
 #myDB.verify('faces', 'images/min2.jpg', 'min', FRmodel)
 
 myDB.close_conn()
+
+"""
+# output from the above code
+
+Connection established :)
+Successfully connected to database: FaceDetect!
+Successfully created tables: Faces and Encoding!
+ID matches found, but no one with the same full name.
+Successfully added min with id: kmmin001 to db!
+Successfully added min's encoding to db!
+There is already a person with the same id and full name.
+min's id: kmmin001
+Successfully added min's encoding to db!
+ID matches found, but no one with the same full name.
+Successfully added danielle with id: jndan001 to db!
+Successfully added danielle's encoding to db!
+There are 2 faces on Faces table.
+min found with id: kmmin001
+It's min kim, welcome in!
+Successfully disconnected from db!
+"""
