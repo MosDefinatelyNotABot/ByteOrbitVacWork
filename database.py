@@ -12,6 +12,7 @@ import numpy as np  # pip instll numpy
 
 class vectorDB:
 
+    # connects to db
     # myDB = vectorDB('postgres', '2518', 'FaceDetect', 'localhost')
     def __init__(self, user : str, password : str, database : str, host = 'localhost'): # if host not given, uses localhost
         self.user = user
@@ -70,7 +71,8 @@ class vectorDB:
             """
             CREATE TABLE Encoding(
             id VARCHAR(8) REFERENCES Faces,
-            encoding BYTEA NOT NULL
+            encoding BYTEA NOT NULL,
+            timestamp TIMESTAMPTZ DEFAULT NOW()
             )
             """
         )
@@ -147,9 +149,9 @@ class vectorDB:
 
     # myDB.verify('images/andrew.jpg', 'andrew tate', FRmodel)
     def verify(self, image_path : str, identity : str, model):
-        identity = identity.split()
-        firstName = identity[0]
-        lastName = identity[1]
+        fullName = identity.split()
+        firstName = fullName[0]
+        lastName = fullName[1]
 
         cursor = self.conn.cursor()
         
@@ -163,9 +165,9 @@ class vectorDB:
             if result:
                 # if person exists on db, get their id
                 id = result[0]
-                print("{} found with id: {}".format(identity, id))
+                print("{} found with id: {}".format(firstName, id))
 
-                query = ("SELECT encoding FROM Encoding WHERE id={}".format(id))
+                query = ("SELECT encoding FROM Encoding WHERE id='{}'".format(id))
                 cursor.execute(query)
         
                 unpickledEncoding = pickle.loads(cursor.fetchone()[0])     # back to numpy
@@ -193,9 +195,94 @@ class vectorDB:
 
         cursor.close()
 
+    
 
-    #def numOfFaces(self):
+    # prints/returns the number of registered faces
+    def numOfFaces(self):
+        cursor = self.conn.cursor()
 
+        cursor.execute("SELECT COUNT(*) FROM Faces")
+        count = cursor.fetchone()[0]
+
+        print("There are {} faces on Faces table.".format(count))
+        #return count   # uncomment depending on how the function gets used
+
+        cursor.close()
+
+
+
+    # returns dictionary of encodings for all the registered faces
+    # encodings are the most recently added one for each face
+    def fetchEncodings(self):
+        cursor = self.conn.cursor()
+
+        try:
+            # Execute the CTE query to get the most recent encoding for each ID
+            cursor.execute(
+                """
+                WITH RankedEncodings AS (
+                    SELECT 
+                        id, 
+                        encoding, 
+                        ROW_NUMBER() OVER (PARTITION BY id ORDER BY timestamp DESC) AS rn
+                    FROM Encoding
+                )
+                SELECT id, encoding
+                FROM RankedEncodings
+                WHERE rn = 1;
+                """
+            )
+            
+            # Fetch all results
+            results = cursor.fetchall()
+            
+            result = {}
+            for row in results:
+                id, encoding = row
+                unpickledEncoding = pickle.loads(encoding)     # back to numpy
+                result[id] = unpickledEncoding
+
+            return result
+
+        except psycopg2.Error as e:
+            print("Error executing query:", e)
+            self.conn.rollback()
+
+        cursor.close()
+
+    
+    # returns dictionary of encodings for all the registered faces
+    def fetchEncodingOf(self, identity : str):
+        cursor = self.conn.cursor()
+
+        fullName = identity.split()
+        firstName = fullName[0]
+        lastName = fullName[1]
+
+        cursor.execute("SELECT id FROM Faces WHERE firstName=%s AND lastName=%s", (firstName, lastName))
+        results = cursor.fetchone()
+        try:
+            if results:
+                # if person exists on db, get their id
+                id = results[0]
+                print("{} found with id: {}".format(firstName, id))
+
+                query = ("SELECT encoding FROM Encoding WHERE id='{}'".format(id))
+                cursor.execute(query)
+
+                encoding = cursor.fetchone()[0]
+                unpickledEncoding = pickle.loads(encoding)     # back to numpy
+
+                result = {}
+                result[id] = unpickledEncoding
+
+                return result
+
+        except psycopg2.Error as e:
+            print("Error executing query:", e)
+            self.conn.rollback()
+
+        cursor.close()
         
     
         
