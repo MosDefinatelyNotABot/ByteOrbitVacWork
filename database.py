@@ -42,7 +42,6 @@ class vectorDB:
         # CREATE EXTENSION IF NOT EXISTS vector ## still need to work on this
         # register_vector(self.conn) 
         
-        
 
     
     # myDB.createFaceTable()
@@ -57,17 +56,18 @@ class vectorDB:
         
 
         # id uuid PRIMARY KEY DEFAULT uuid_generate_v4() // if SERIAL PRIMARY KEY not sufficient; CREATE EXTENSION in that case
-        cursor.execute(
+        cursor.execute( # table to store ID and name
             """
             CREATE TABLE IF NOT EXISTS Faces(
             id VARCHAR(8) PRIMARY KEY,
             firstName VARCHAR(255) NOT NULL,
-            lastName VARCHAR(255) NOT NULL
+            lastName VARCHAR(255) NOT NULL,
+            thumbnail BYTEA NOT NULL
             )
             """
         )
 
-        cursor.execute( # table to store encoding for each face
+        cursor.execute( # table to store encoding for each face; can have multiple encodings per ID (face)
             """
             CREATE TABLE Encoding(
             id VARCHAR(8) REFERENCES Faces,
@@ -77,7 +77,14 @@ class vectorDB:
             """
         )
 
-        # CREATE TABLE Logging  # to store who is in/out
+        cursor.execute( # table to store events
+            """
+            CREATE TABLE Events(
+            id SERIAL PRIMARY KEY,
+            timestamp TIMESTAMPTZ DEFAULT NOW()
+            )
+            """
+        )
         
 
         print("Successfully created tables: Faces and Encoding!")
@@ -122,6 +129,8 @@ class vectorDB:
             print("ID matches found, but no one with the same full name.")
             # proceed to add their face to Faces table
 
+            
+
             count += 1  # 001 is the first person with that id
             if count < 10:      # this block assumes that there won't be more than 999 people with same id
                 id += "00" + str(count)
@@ -147,6 +156,7 @@ class vectorDB:
         cursor.close()
 
 
+    # if identity exists on db, it verifies. Otherwise says it doesn't exist.
     # myDB.verify('images/andrew.jpg', 'andrew tate', FRmodel)
     def verify(self, image_path : str, identity : str, model):
         fullName = identity.split()
@@ -178,11 +188,13 @@ class vectorDB:
                     print("It's " + str(identity) + ", welcome in!")
                     door_open = True
 
-                    # add (face) to Logging
+                    # add (face) to Events
 
                 else:
                     print("It's not " + str(identity) + ", please go away")
                     door_open = False
+
+                    # add (UNKNOWN) to Events
 
 
                 return dist, door_open
@@ -292,3 +304,22 @@ class vectorDB:
         print("Successfully disconnected from db!")
 
 
+# using the functions
+myDB = vectorDB('postgres', '2518', 'FaceDetect', 'localhost')
+
+myDB.createFaceTable()
+
+myDB.addFaces('min', 'kim', img_to_encoding("images/min.jpg", FRmodel))
+myDB.addFaces('min', 'kim', img_to_encoding("images/min2.jpg", FRmodel))
+myDB.addFaces('danielle', 'jean', img_to_encoding("images/danielle.png", FRmodel))
+#myDB.addFaces('kian', 'vanrensburg', img_to_encoding("images/kian.jpg", FRmodel))
+#myDB.addFaces('younes', 'lee', img_to_encoding("images/andrew.jpg", FRmodel))
+
+myDB.numOfFaces()
+#myDB.fetchEncodings()   # returns dictionary
+#myDB.fetchEncodingOf('min kim') # returns dictionary
+
+myDB.verify('images/min.jpg', 'min kim', FRmodel)
+#myDB.verify('faces', 'images/min2.jpg', 'min', FRmodel)
+
+myDB.close_conn()
