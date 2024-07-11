@@ -12,22 +12,16 @@ import numpy as np  # pip instll numpy
 
 class vectorDB:
 
-    # myDB = vectorDB('user', password, database, host)
-    def __init__(self, user : str, password : str, database : 'postgres', host = 'localhost'): # if host not given, uses localhost
+    # myDB = vectorDB('postgres', '2518', 'FaceDetect', 'localhost')
+    def __init__(self, user : str, password : str, database : str, host = 'localhost'): # if host not given, uses localhost
         self.user = user
         self.password = password    # probably not the safest approach to get pw ??
         self.database = database
         self.host = host
 
-        '''
-        conn = psycopg2.connect(user="postgres", password='2518',
-                                host='localhost', database='FaceDetect')
-        '''
-
-        self.conn = psycopg2.connect(user=self.user, password=self.password, database = database, host=self.host)
+        self.conn = psycopg2.connect(user=self.user, password=self.password, host=self.host)
         
-        print("Connection established")
-
+        print("Connection established :)")
 
         self.conn.set_session(autocommit=True)
     
@@ -39,104 +33,175 @@ class vectorDB:
         
         if not exists:
             cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database)))  # ensures no duplicate DB is created
-            print("Database successfully created!")
+            print("Database: {} successfully created!".format(database))
         else:
-            print("Successfully connected to database!")
+            print("Successfully connected to database: {}!".format(database))
 
-        cursor.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
+        # cursor.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
         # CREATE EXTENSION IF NOT EXISTS vector ## still need to work on this
         # register_vector(self.conn) 
         
         
 
     
-    # myDB.createTable('Faces')
-    def createTable(self, tableName : str):
+    # myDB.createFaceTable()
+    # tableName is set to 'Faces'
+    def createFaceTable(self):
 
         cursor = self.conn.cursor()
-    
-        cursor.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(sql.Identifier(tableName)))    # deletes table if exists
 
-        cursor.execute(sql.SQL(
+        # might be good idea to make it optional to delete existing Faces table
+        cursor.execute("DROP TABLE IF EXISTS Faces CASCADE")    # deletes table if exists
+        cursor.execute("DROP TABLE IF EXISTS Encoding")
+        
+
+        # id uuid PRIMARY KEY DEFAULT uuid_generate_v4() // if SERIAL PRIMARY KEY not sufficient; CREATE EXTENSION in that case
+        cursor.execute(
             """
-            CREATE TABLE {}(
-            id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-            name VARCHAR(255) NOT NULL,
-            encoding BYTEA NOT NULL)
+            CREATE TABLE IF NOT EXISTS Faces(
+            id VARCHAR(8) PRIMARY KEY,
+            firstName VARCHAR(255) NOT NULL,
+            lastName VARCHAR(255) NOT NULL
+            )
             """
-        ).format(sql.Identifier(tableName)))
+        )
 
+        cursor.execute( # table to store encoding for each face
+            """
+            CREATE TABLE Encoding(
+            id VARCHAR(8) REFERENCES Faces,
+            encoding BYTEA NOT NULL
+            )
+            """
+        )
 
-        print("Table successfully created!")
+        # CREATE TABLE Logging  # to store who is in/out
+        
+
+        print("Successfully created tables: Faces and Encoding!")
 
         cursor.close()
 
 
-    # myDB.addFaces('andrew', img_to_encoding("images/andrew.jpg", FRmodel))
-    def addFaces(self, tableName : str, name : str, encoding : np):  # otherwise take image_path : str rather than encoding
+    # myDB.addFaces('andrew', 'tate', img_to_encoding('images/andrew.jpg', FRmodel))
+    def addFaces(self, firstName : str, lastName : str, encoding : np):  # otherwise take image_path : str rather than encoding
     
         cursor = self.conn.cursor()
 
-        addFace = ("INSERT INTO {} "
-                    "(name, encoding) "
-                    "VALUES (%s, %s)").format(tableName)
-        
+        addFace = ("INSERT INTO Faces (id, firstName, lastName) VALUES (%s, %s, %s)")
+
+
+        # id is created uniquely using 5 letters of full name & 3 digit number (000)
+        id = lastName[0] + lastName[-1]
+        if len(firstName) < 3:
+            id += firstName + 'X'
+        else:
+            id += firstName[0] + firstName[1] + firstName[2]
+
+        cursor.execute("SELECT COUNT(*) FROM Faces WHERE id LIKE %s", (id + '%',))
+        count = cursor.fetchone()[0]
+        #print(f"Number of rows where name starts with '{id}': {count}")
+
+        # if there are people with same id, check if it's same person
+        # for now, we assume if their full names match, it's the same person. but this needs to be changed
+        if count > 0:
+            cursor.execute("SELECT id FROM Faces WHERE id LIKE %s AND firstName = %s AND lastName = %s", 
+                           (id + '%', firstName, lastName))
+            matchingRows = cursor.fetchall()
+
+            if matchingRows:
+                print("There is already a person with the same id and full name.")
+                # don't add them to Faces table; only add the encoding
+                for row in matchingRows:
+                    id = row[0]
+                    print("{}'s id: {}".format(firstName, id))
+                
+        else:
+            print("ID matches found, but no one with the same full name.")
+            # proceed to add their face to Faces table
+
+            count += 1  # 001 is the first person with that id
+            if count < 10:      # this block assumes that there won't be more than 999 people with same id
+                id += "00" + str(count)
+            elif count < 100:
+                id += "0" + str(count)
+            else:
+                id += str(count)
+            #print("{}'s id is: ".format(firstName) + id)
+
+            cursor.execute(addFace, (id, firstName, lastName))
+            print("Successfully added {} with id: {} to db!".format(firstName, id))
+
+
+        # now add pickledEncoding
         pickledEncoding = pickle.dumps(encoding) # dumps() serialises an object
+
+        addEncoding = ("INSERT INTO Encoding (id, encoding) VALUES (%s, %s)")
+        encodingQuery = (id, pickledEncoding)
         
-        dataFace = (name, pickledEncoding)
-
-        cursor.execute(addFace, dataFace)
-
-        print("Successfully added faces to db!")
+        cursor.execute(addEncoding, encodingQuery)
+        print("Successfully added {}'s encoding to db!".format(firstName))
 
         cursor.close()
 
 
-    # myDB.verify("images/andrew.jpg", "andrew", FRmodel)
-    def verify(self, tableName : str, image_path : str, identity : str, model): # erased 'database' from prev version
-        
+    # myDB.verify('images/andrew.jpg', 'andrew tate', FRmodel)
+    def verify(self, image_path : str, identity : str, model):
+        identity = identity.split()
+        firstName = identity[0]
+        lastName = identity[1]
+
         cursor = self.conn.cursor()
         
         encoding = img_to_encoding(image_path, model)
 
-        query = ("SELECT encoding FROM {} WHERE name='%s'").format(tableName)
+        # we are still assuming people with same full names are one person
+        cursor.execute("SELECT id FROM Faces WHERE firstName=%s AND lastName=%s", (firstName, lastName))
+        result = cursor.fetchone()
+
+        try:
+            if result:
+                # if person exists on db, get their id
+                id = result[0]
+                print("{} found with id: {}".format(identity, id))
+
+                query = ("SELECT encoding FROM Encoding WHERE id={}".format(id))
+                cursor.execute(query)
         
-        cursor.execute(query, identity)
-    
-        unpickled_encoding = pickle.loads(cursor.fetchone()[0]) # back to numpy
-    
+                unpickledEncoding = pickle.loads(cursor.fetchone()[0])     # back to numpy
 
-        dist = np.linalg.norm(tf.subtract(unpickled_encoding, encoding))
+                dist = np.linalg.norm(tf.subtract(unpickledEncoding, encoding))
+                
+                if dist < 0.7:
+                    print("It's " + str(identity) + ", welcome in!")
+                    door_open = True
+
+                    # add (face) to Logging
+
+                else:
+                    print("It's not " + str(identity) + ", please go away")
+                    door_open = False
+
+
+                return dist, door_open
+            else:
+                print("{} not found on db :( Add the face first before verification.".format(identity))
+       
+        except psycopg2.Error as e:
+            print("Error executing query:", e)
+            self.conn.rollback()
+
+        cursor.close()
+
+
+    #def numOfFaces(self):
+
         
-        if dist < 0.7:
-            print("It's " + str(identity) + ", welcome in!")
-            door_open = True
-        else:
-            print("It's not " + str(identity) + ", please go away")
-            door_open = False
-
-            cursor.close()
-
-        return dist, door_open
     
         
     # myDB.close_conn()
     def close_conn(self):
         self.conn.close()
         print("Successfully disconnected from db!")
-
-
-myDB = vectorDB('postgres', '2518', 'testDB', 'localhost')
-
-myDB.createFaceTable('faces')
-
-myDB.addFaces('faces', 'andrew', img_to_encoding("images/andrew.jpg", FRmodel))
-myDB.addFaces('faces', 'danielle', img_to_encoding("images/danielle.png", FRmodel))
-myDB.addFaces('faces', 'kian', img_to_encoding("images/kian.jpg", FRmodel))
-myDB.addFaces('faces', 'younes', img_to_encoding("images/andrew.jpg", FRmodel))
-myDB.verify('faces', 'images/andrew.jpg', 'danielle', FRmodel)
-
-myDB.close_conn()
-
 
 
