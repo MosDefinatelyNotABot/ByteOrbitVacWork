@@ -7,6 +7,8 @@ from psycopg2 import sql
 #from pgvector.psycopg2 import register_vector   # pip install pgvector
 import pickle 
 import numpy as np 
+from facenet import *
+import tensorflow as tf
 
 
 
@@ -97,11 +99,12 @@ class vectorDB:
     def addThumbnail(self, id : str, imgPath : str):
 
         cursor = self.conn.cursor()
-
-        query = sql.SQL("INSERT INTO Faces (thumbnail) VALUES  (imgPath) WHERE id = '%s'").format(sql.Identifier(id))
-        cursor.execute(query)
+        
+        cursor.execute("UPDATE Faces SET thumbnail = %s WHERE id = %s", (imgPath, id))
 
         print("Added thumbnail")
+
+        cursor.close()
 
 
     # myDB.addFaces('andrew', 'tate', img_to_encoding('images/andrew.jpg', FRmodel))
@@ -181,15 +184,14 @@ class vectorDB:
 
 
     # if identity exists on db, it verifies. Otherwise says it doesn't exist.
-    # myDB.verify('images/andrew.jpg', 'andrew tate', FRmodel)
-    def verify(self, imgPath : str, identity : str, model):
+    def verify(self, img: np.ndarray, identity : str, model):
         fullName = identity.split()
         firstName = fullName[0]
         lastName = fullName[1]
 
         cursor = self.conn.cursor()
         
-        encoding = img_to_encoding(imgPath, model)
+        encoding = img_to_encoding(img, model)
 
         # we are still assuming people with same full names are one person
         cursor.execute("SELECT id FROM Faces WHERE firstName=%s AND lastName=%s", (firstName, lastName))
@@ -209,13 +211,13 @@ class vectorDB:
                 dist = np.linalg.norm(tf.subtract(unpickledEncoding, encoding))
                 
                 if dist < 0.7:
-                    print("It's " + str(identity) + ", welcome in!")
+                    print(f"It's " + str(identity) + ", welcome in! dist " + str(dist))
                     door_open = True
 
                     # add (face) to Events
 
                 else:
-                    print("It's not " + str(identity) + ", please go away")
+                    print("It's not " + str(identity) + ", please go away. dist:"+ str(dist))
                     door_open = False
 
                     # add (UNKNOWN) to Events
@@ -326,52 +328,5 @@ class vectorDB:
     def close_conn(self):
         self.conn.close()
         print("Successfully disconnected from db!")
-
-
-"""
-# usage example
-
-myDB = vectorDB('postgres', '2518', 'FaceDetection', 'localhost')
-
-myDB.createFaceTable()
-myDB.numOfFaces()
-
-myDB.addFaces('min', 'kim', img_to_encoding("images/min.jpg", FRmodel))
-myDB.addFaces('min', 'kim', img_to_encoding("images/min2.jpg", FRmodel))
-myDB.addFaces('danielle', 'jean', img_to_encoding("images/danielle.png", FRmodel))
-#myDB.addFaces('kian', 'vanrensburg', img_to_encoding("images/kian.jpg", FRmodel))
-#myDB.addFaces('younes', 'lee', img_to_encoding("images/andrew.jpg", FRmodel))
-
-myDB.numOfFaces()
-#myDB.fetchEncodings()   # returns dictionary
-#myDB.fetchEncodingOf('min kim') # returns dictionary
-
-myDB.verify('images/min.jpg', 'min kim', FRmodel)
-#myDB.verify('faces', 'images/min2.jpg', 'min', FRmodel)
-
-myDB.close_conn()
-
-
-# output
-
-Connection established :)
-Successfully connected to database: FaceDetection!
-Successfully created tables: Faces & Encoding & Events!
-There are 0 faces on Faces table.
-New face min's new id is: kmmin001
-Successfully added min with id: kmmin001 to db!
-Successfully added min's encoding to db!
-There is already a person with the same id and full name.
-Old face min's id: kmmin001
-Successfully added min's encoding to db!
-New face danielle's new id is: jndan001
-Successfully added danielle with id: jndan001 to db!
-Successfully added danielle's encoding to db!
-There are 2 faces on Faces table.
-min found with id: kmmin001
-It's min kim, welcome in!
-Successfully disconnected from db!
-
-"""
 
 
