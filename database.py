@@ -1,12 +1,12 @@
-# postgreSQL database to store faces (name & img_encoding)
+# postgreSQL database to store faces (name & img_encoding) & events
 
 
-import psycopg2 # make sure to pip install psycopg2 for postgreSQL & downloaded postgreSQL on your machine
-                # also make sure your postgreSQL is running if running locally
+import psycopg2 # make sure to install postgreSQL on your machine
+                # also make sure your postgreSQL server is running if running locally
 from psycopg2 import sql
-from pgvector.psycopg2 import register_vector   # pip install pgvector
+#from pgvector.psycopg2 import register_vector   # pip install pgvector
 import pickle 
-import numpy as np  # pip instll numpy
+import numpy as np 
 
 
 
@@ -53,6 +53,7 @@ class vectorDB:
         # might be good idea to make it optional to delete existing Faces table
         cursor.execute("DROP TABLE IF EXISTS Faces CASCADE")    # deletes table if exists
         cursor.execute("DROP TABLE IF EXISTS Encoding")
+        cursor.execute("DROP TABLE IF EXISTS Events")
         
 
         # id uuid PRIMARY KEY DEFAULT uuid_generate_v4() // if SERIAL PRIMARY KEY not sufficient; CREATE EXTENSION in that case
@@ -62,7 +63,7 @@ class vectorDB:
             id VARCHAR(8) PRIMARY KEY,
             firstName VARCHAR(255) NOT NULL,
             lastName VARCHAR(255) NOT NULL,
-            thumbnail BYTEA NOT NULL
+            thumbnail BYTEA
             )
             """
         )
@@ -87,18 +88,26 @@ class vectorDB:
         )
         
 
-        print("Successfully created tables: Faces and Encoding!")
+        print("Successfully created tables: Faces & Encoding & Events!")
 
         cursor.close()
 
 
-    # myDB.addFaces('andrew', 'tate', img_to_encoding('images/andrew.jpg', FRmodel))
-    def addFaces(self, firstName : str, lastName : str, encoding : np):  # otherwise take image_path : str rather than encoding
-    
+    # add thumbnail img to row in Faces - called when registering new Face
+    def addThumbnail(self, id : str, imgPath : str):
+
         cursor = self.conn.cursor()
 
-        addFace = ("INSERT INTO Faces (id, firstName, lastName) VALUES (%s, %s, %s)")
+        query = sql.SQL("INSERT INTO Faces (thumbnail) VALUES  (imgPath) WHERE id = '%s'").format(sql.Identifier(id))
+        cursor.execute(query)
 
+        print("Added thumbnail")
+
+
+    # myDB.addFaces('andrew', 'tate', img_to_encoding('images/andrew.jpg', FRmodel))
+    def addFaces(self, firstName : str, lastName : str, encoding : np) -> tuple:  # returns newFace : bool and id : str
+    
+        cursor = self.conn.cursor()
 
         # id is created uniquely using 5 letters of full name & 3 digit number (000)
         id = lastName[0] + lastName[-1]
@@ -123,13 +132,24 @@ class vectorDB:
                 # don't add them to Faces table; only add the encoding
                 for row in matchingRows:
                     id = row[0]
-                    print("{}'s id: {}".format(firstName, id))
+                    print("Old face {}'s id: {}".format(firstName, id))
+
+            # now add pickledEncoding
+            pickledEncoding = pickle.dumps(encoding) # dumps() serialises an object
+
+            addEncoding = ("INSERT INTO Encoding (id, encoding) VALUES (%s, %s)")
+            encodingQuery = (id, pickledEncoding)
+            
+            cursor.execute(addEncoding, encodingQuery)
+            print("Successfully added {}'s encoding to db!".format(firstName))
+
+            cursor.close()
+            
+            return False, ''
                 
         else:
-            print("ID matches found, but no one with the same full name.")
-            # proceed to add their face to Faces table
-
-            
+            # new Face! - proceed to add their face to Faces table
+            addFace = ("INSERT INTO Faces (id, firstName, lastName) VALUES (%s, %s, %s)")
 
             count += 1  # 001 is the first person with that id
             if count < 10:      # this block assumes that there won't be more than 999 people with same id
@@ -138,34 +158,38 @@ class vectorDB:
                 id += "0" + str(count)
             else:
                 id += str(count)
-            #print("{}'s id is: ".format(firstName) + id)
+            print("New face {}'s new id is: ".format(firstName) + id)
+
+            # add thumbnail
 
             cursor.execute(addFace, (id, firstName, lastName))
             print("Successfully added {} with id: {} to db!".format(firstName, id))
 
+            # now add pickledEncoding
+            pickledEncoding = pickle.dumps(encoding) # dumps() serialises an object
 
-        # now add pickledEncoding
-        pickledEncoding = pickle.dumps(encoding) # dumps() serialises an object
+            addEncoding = ("INSERT INTO Encoding (id, encoding) VALUES (%s, %s)")
+            encodingQuery = (id, pickledEncoding)
+            
+            cursor.execute(addEncoding, encodingQuery)
+            print("Successfully added {}'s encoding to db!".format(firstName))
 
-        addEncoding = ("INSERT INTO Encoding (id, encoding) VALUES (%s, %s)")
-        encodingQuery = (id, pickledEncoding)
+            cursor.close()
+
+            return True, id # then add thumbnail
         
-        cursor.execute(addEncoding, encodingQuery)
-        print("Successfully added {}'s encoding to db!".format(firstName))
-
-        cursor.close()
 
 
     # if identity exists on db, it verifies. Otherwise says it doesn't exist.
     # myDB.verify('images/andrew.jpg', 'andrew tate', FRmodel)
-    def verify(self, image_path : str, identity : str, model):
+    def verify(self, imgPath : str, identity : str, model):
         fullName = identity.split()
         firstName = fullName[0]
         lastName = fullName[1]
 
         cursor = self.conn.cursor()
         
-        encoding = img_to_encoding(image_path, model)
+        encoding = img_to_encoding(imgPath, model)
 
         # we are still assuming people with same full names are one person
         cursor.execute("SELECT id FROM Faces WHERE firstName=%s AND lastName=%s", (firstName, lastName))
@@ -263,7 +287,7 @@ class vectorDB:
         cursor.close()
 
     
-    # returns dictionary of encodings for all the registered faces
+    # returns dictionary of encodings for specified person
     def fetchEncodingOf(self, identity : str):
         cursor = self.conn.cursor()
 
@@ -304,10 +328,13 @@ class vectorDB:
         print("Successfully disconnected from db!")
 
 
-# using the functions
-myDB = vectorDB('postgres', '2518', 'FaceDetect', 'localhost')
+"""
+# usage example
+
+myDB = vectorDB('postgres', '2518', 'FaceDetection', 'localhost')
 
 myDB.createFaceTable()
+myDB.numOfFaces()
 
 myDB.addFaces('min', 'kim', img_to_encoding("images/min.jpg", FRmodel))
 myDB.addFaces('min', 'kim', img_to_encoding("images/min2.jpg", FRmodel))
@@ -324,23 +351,27 @@ myDB.verify('images/min.jpg', 'min kim', FRmodel)
 
 myDB.close_conn()
 
-"""
-# output from the above code
+
+# output
 
 Connection established :)
-Successfully connected to database: FaceDetect!
-Successfully created tables: Faces and Encoding!
-ID matches found, but no one with the same full name.
+Successfully connected to database: FaceDetection!
+Successfully created tables: Faces & Encoding & Events!
+There are 0 faces on Faces table.
+New face min's new id is: kmmin001
 Successfully added min with id: kmmin001 to db!
 Successfully added min's encoding to db!
 There is already a person with the same id and full name.
-min's id: kmmin001
+Old face min's id: kmmin001
 Successfully added min's encoding to db!
-ID matches found, but no one with the same full name.
+New face danielle's new id is: jndan001
 Successfully added danielle with id: jndan001 to db!
 Successfully added danielle's encoding to db!
 There are 2 faces on Faces table.
 min found with id: kmmin001
 It's min kim, welcome in!
 Successfully disconnected from db!
+
 """
+
+
